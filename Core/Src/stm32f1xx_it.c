@@ -253,8 +253,9 @@ void USART1_IRQHandler(void)
     
     if(osMessageQueuePut(usart1_receive_dataHandle, &usart1_receive_pool_idx, NULL, 0)!=osErrorResource)
     {
-      usart1_receive_pool_idx = (usart1_receive_pool_idx + 1) % 3;
+      
     }
+    usart1_receive_pool_idx = (usart1_receive_pool_idx + 1) % 3;
     HAL_UART_Receive_DMA(&huart1, usart1_receive_pool[usart1_receive_pool_idx], 32);
   }
   HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);

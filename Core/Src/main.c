@@ -98,12 +98,14 @@ const osTimerAttr_t ledlight_update_attributes = {
 /* USER CODE BEGIN PV */
 
 
-uint8_t usart1_receive_pool[3][33]={0};//usart1缓冲池
+uint8_t usart1_receive_pool[3][33]={0};//usart1缓冲�??
 uint8_t usart1_receive_len[3]={0};
 uint8_t usart1_receive_pool_idx=0;
-osSemaphoreId_t uart_tx_sem;//dma-usart1发送忙标志
+osSemaphoreId_t uart_tx_sem;//dma-usart1发�?�忙标志
 
-
+volatile int light_change=100;
+volatile int f=1000;
+volatile int f_new=1000;
 
 
 
@@ -126,7 +128,49 @@ void StartTask3(void *argument);
 void ledlight_update_(void *argument);
 
 /* USER CODE BEGIN PFP */
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+  can_receive_pack message = {0};
+  CAN_RxHeaderTypeDef rx_header = {0};
+  uint8_t raw_buf[8];
 
+  if (hcan->Instance != CAN1)
+    return;
+
+  HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, raw_buf);
+
+  message.id = (rx_header.IDE == CAN_ID_STD) ? rx_header.StdId : rx_header.ExtId;
+  message.len = rx_header.DLC;
+  memcpy(message.data, raw_buf, message.len);
+
+HAL_GPIO_TogglePin(GPIOC,GPIO_PIN_13);
+
+  osMessageQueuePut(can_receive_mailHandle, &message, 0U, 0U);
+}
+
+uint8_t CAN_sendmail(uint32_t stdId, uint8_t *pData, uint8_t len)
+{
+  CAN_TxHeaderTypeDef txHeader = {0};
+  uint32_t txMailbox = 0;
+  uint8_t tempData[8] = {0};
+
+  txHeader.StdId = stdId;
+  txHeader.IDE = CAN_ID_STD;
+  txHeader.RTR = CAN_RTR_DATA;
+  txHeader.DLC =
+      (len > 8) ? 8 : len;
+  memcpy(tempData, pData, txHeader.DLC);
+
+  if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) == 0)
+  {
+    return 0;
+  }
+  if (HAL_CAN_AddTxMessage(&hcan, &txHeader, tempData, &txMailbox) != HAL_OK)
+  {
+    return 0;
+  }
+  return 1;
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -167,7 +211,7 @@ int main(void)
   MX_CAN_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-
+ HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -188,6 +232,8 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
+
+  osTimerStart(ledlight_updateHandle,pdMS_TO_TICKS(50));
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
@@ -307,7 +353,26 @@ static void MX_CAN_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN_Init 2 */
+CAN_FilterTypeDef sFilterConfig = {0};
+uint32_t id = 0x0111;   
+uint32_t mask = 0x0fff;  
+uint32_t id32 = id << 21;
+uint32_t mask32 = mask << 21;
+sFilterConfig.FilterBank = 0;
+sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
+sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT;
+sFilterConfig.FilterFIFOAssignment = CAN_FILTER_FIFO0;
+sFilterConfig.FilterActivation = ENABLE;
+sFilterConfig.FilterIdHigh = (uint16_t)(id32 >> 16);
+sFilterConfig.FilterIdLow  = (uint16_t)(id32 & 0xFFFF);
+sFilterConfig.FilterMaskIdHigh = (uint16_t)(mask32 >> 16);
+sFilterConfig.FilterMaskIdLow  = (uint16_t)(mask32 & 0xFFFF);
 
+HAL_CAN_ConfigFilter(&hcan,&sFilterConfig);
+
+HAL_CAN_ActivateNotification(&hcan,CAN_IT_RX_FIFO0_MSG_PENDING);
+
+HAL_CAN_Start(&hcan);
   /* USER CODE END CAN_Init 2 */
 
 }
@@ -332,9 +397,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 72-1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
+  htim1.Init.Period = 999;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -476,10 +541,25 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 void StartTask1(void *argument)
 {
   /* USER CODE BEGIN 5 */
+  can_receive_pack receive_pack = {0};
+  int can_light_f_ms = 0;
   /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(100);
+    xQueueReceive(can_receive_mailHandle, &receive_pack, HAL_MAX_DELAY);
+    if (receive_pack.id == 0x111)
+    {
+      can_light_f_ms = 0;
+      if (receive_pack.len == 1)
+      {
+        can_light_f_ms = receive_pack.data[receive_pack.len - 1];
+      }
+      else if (receive_pack.len > 1)
+      {
+        can_light_f_ms = receive_pack.data[receive_pack.len - 1] + receive_pack.data[receive_pack.len - 2] * 256;
+      }
+      xQueueSend(ledlight_controlHandle, &can_light_f_ms, 0);
+    }
   }
   /* USER CODE END 5 */
 }
@@ -495,9 +575,16 @@ void StartTask2(void *argument)
 {
   /* USER CODE BEGIN StartTask2 */
   /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(100);
+
+    xQueueReceive(ledlight_controlHandle, &f_new, HAL_MAX_DELAY);
+    if (f_new != f && f_new != 0)
+    {
+      f = f_new;
+      light_change = 100000 / f;
+    }
+
   }
   /* USER CODE END StartTask2 */
 }
@@ -516,7 +603,7 @@ void StartTask3(void *argument)
   uint8_t *receive;
   uint8_t receive_idx;
   uint8_t receive_len;
-  uint16_t offset;//拼接位置
+  uint16_t offset;//????
   /* Infinite loop */
   for(;;)
   {
@@ -553,7 +640,32 @@ HAL_UART_Transmit_DMA(&huart1, tosend, offset);
 void ledlight_update_(void *argument)
 {
   /* USER CODE BEGIN ledlight_update_ */
-
+  static int light; // 50ms
+  
+  static char per;
+  
+  if (per == 1)
+  {
+    light += light_change;
+  }
+  else
+  {
+    light -= light_change;
+  }
+  while (light < 0 || light > 999)
+  {
+    if (light < 0)
+    {
+      light = -light;
+      per = 1;
+    }
+    else
+    {
+      light = 1998 - light;
+      per = 0;
+    }
+  }
+__HAL_TIM_SetCompare(&htim1,TIM_CHANNEL_1,light);
   /* USER CODE END ledlight_update_ */
 }
 
