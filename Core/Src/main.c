@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,6 +51,8 @@ CAN_HandleTypeDef hcan;
 TIM_HandleTypeDef htim1;
 
 UART_HandleTypeDef huart1;
+DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart1_tx;
 
 /* Definitions for Task1 */
 osThreadId_t Task1Handle;
@@ -95,6 +97,20 @@ const osTimerAttr_t ledlight_update_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+
+uint8_t usart1_receive_pool[3][33]={0};//usart1缓冲池
+uint8_t usart1_receive_len[3]={0};
+uint8_t usart1_receive_pool_idx=0;
+osSemaphoreId_t uart_tx_sem;//dma-usart1发送忙标志
+
+
+
+
+
+
+
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,6 +118,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_CAN_Init(void);
+static void MX_DMA_Init(void);
 static void MX_TIM1_Init(void);
 void StartTask1(void *argument);
 void StartTask2(void *argument);
@@ -145,6 +162,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+	MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_CAN_Init();
   MX_TIM1_Init();
@@ -161,6 +179,7 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
+  uart_tx_sem = osSemaphoreNew(1, 1, NULL);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* Create the timer(s) */
@@ -179,7 +198,7 @@ int main(void)
   ledlight_controlHandle = osMessageQueueNew (1, sizeof(uint16_t), &ledlight_control_attributes);
 
   /* creation of usart1_receive_data */
-  usart1_receive_dataHandle = osMessageQueueNew (3, sizeof(uint8_t*), &usart1_receive_data_attributes);
+  usart1_receive_dataHandle = osMessageQueueNew (3, sizeof(uint8_t), &usart1_receive_data_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -386,8 +405,28 @@ static void MX_USART1_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USART1_Init 2 */
-
+		__HAL_UART_ENABLE_IT(&huart1,UART_IT_IDLE);
+	HAL_UART_Receive_DMA(&huart1,usart1_receive_pool[usart1_receive_pool_idx],32);
   /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
@@ -418,7 +457,13 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART1)
+  {
+    osSemaphoreRelease(uart_tx_sem);
+  }
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartTask1 */
@@ -434,7 +479,7 @@ void StartTask1(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(100);
   }
   /* USER CODE END 5 */
 }
@@ -452,7 +497,7 @@ void StartTask2(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(100);
   }
   /* USER CODE END StartTask2 */
 }
@@ -467,9 +512,38 @@ void StartTask2(void *argument)
 void StartTask3(void *argument)
 {
   /* USER CODE BEGIN StartTask3 */
+  uint8_t tosend[47]={0};
+  uint8_t *receive;
+  uint8_t receive_idx;
+  uint8_t receive_len;
+  uint16_t offset;//拼接位置
   /* Infinite loop */
   for(;;)
   {
+      
+ 
+osMessageQueueGet(usart1_receive_dataHandle,&receive_idx,NULL,HAL_MAX_DELAY);
+for(char i=0;i<47;i++)
+{
+tosend[i]=0;
+}
+
+
+receive=usart1_receive_pool[receive_idx];
+receive_len=usart1_receive_len[receive_idx];
+
+offset = 0;
+memcpy(tosend + offset, "Receive Data:", 13);
+offset += 13;
+memcpy(tosend + offset, receive, receive_len);
+offset += receive_len;
+memcpy(tosend + offset, "\n", 1);
+offset += 1;
+
+osSemaphoreAcquire(uart_tx_sem, HAL_MAX_DELAY);
+HAL_UART_Transmit_DMA(&huart1, tosend, offset);
+
+
     osDelay(1);
   }
   /* USER CODE END StartTask3 */

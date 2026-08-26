@@ -32,7 +32,9 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "FreeRTOS.h"
+#include "semphr.h"  
+	#include "cmsis_os.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -42,7 +44,11 @@ extern "C" {
 
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
+extern uint8_t usart1_receive_pool[3][33];
+extern uint8_t usart1_receive_len[3];
+extern uint8_t usart1_receive_pool_idx;
 
+extern osMessageQueueId_t usart1_receive_dataHandle;
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
