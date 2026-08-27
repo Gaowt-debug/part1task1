@@ -119,7 +119,7 @@ const osTimerAttr_t ledlight_update_attributes = {
 /* 环形缓冲池：5 个缓冲区轮流给 DMA 写入。IDLE 中断收到一帧后切换到
  * 下一个缓冲区，避免 DMA 覆盖 Task3 还未读完的数据 */
 uint8_t usart1_receive_pool[5][33]={0};   // 接收缓冲池（每格最大 32 字节 + 1 字节余量）
-uint8_t usart1_receive_len[3]={0};        // 各缓冲区本次实际接收的帧长（字节），与缓冲池编号对应
+uint8_t usart1_receive_len[5]={0};        // 各缓冲区本次实际接收的帧长（字节），与缓冲池编号对应
 uint8_t usart1_receive_pool_idx=0;        // 当前 DMA 正在写入的缓冲区编号（0~4 环形递增）
 
 /*==================== UART 发送同步信号量 ====================*/
